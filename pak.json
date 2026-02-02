@@ -3,7 +3,7 @@
   "version": "v1.0.1",
   "type": "TOOL",
   "description": "Sync your save files to a versioned S3 Bucket.",
-  "author": "K-Wall",
+  "author": "Brandon T. Kowalski",
   "repo_url": "https://github.com/BrandonKowalski/nextui-save-sync",
   "release_filename": "SaveSync.pak.zip",
   "changelog": {
