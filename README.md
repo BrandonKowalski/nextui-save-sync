@@ -23,6 +23,7 @@
     ```yaml
     bucket: "your-bucket-name"
     region: "us-east-1"
+    endpoint: "" # Optional, for non-AWS providers.
     
     save_directory: "/mnt/SDCARD/Saves"
     

@@ -10,10 +10,9 @@ import (
 	"strings"
 	"time"
 
+	gaba "github.com/BrandonKowalski/gabagool/v2/pkg/gabagool"
+	"github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/constants"
 	_ "github.com/UncleJunVIP/certifiable"
-	gaba "github.com/UncleJunVIP/gabagool/pkg/gabagool"
-	"github.com/UncleJunVIP/gabagool/pkg/gabagool/constants"
-	"github.com/UncleJunVIP/nextui-pak-shared-functions/common"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -25,9 +24,10 @@ import (
 var con config
 
 type config struct {
-	Bucket string `yaml:"bucket"`
-	Prefix string `yaml:"prefix"`
-	Region string `yaml:"region"`
+	Bucket   string `yaml:"bucket"`
+	Prefix   string `yaml:"prefix"`
+	Region   string `yaml:"region"`
+	Endpoint string `yaml:"endpoint"`
 
 	SaveDirectory string `yaml:"save_directory"`
 
@@ -69,10 +69,16 @@ func loadConfig(filePath string) (config, error) {
 }
 
 func createSession(config config) (*session.Session, error) {
-	return session.NewSession(&aws.Config{
+	awsConfig := &aws.Config{
 		Region:      aws.String(config.Region),
 		Credentials: credentials.NewStaticCredentials(config.AccessKey, config.SecretKey, ""),
-	})
+	}
+
+	if config.Endpoint != "" {
+		awsConfig.Endpoint = aws.String(config.Endpoint)
+	}
+
+	return session.NewSession(awsConfig)
 }
 
 func uploadSaves(config config) (int, int, error) {
@@ -251,11 +257,12 @@ func init() {
 	gaba.Init(gaba.Options{
 		WindowTitle:    "Save Sync",
 		ShowBackground: true,
+		IsNextUI:       true,
 		LogFilename:    "save_sync.log",
 	})
 	gaba.SetRawLogLevel("ERROR")
 
-	logger := common.GetLoggerInstance()
+	logger := gaba.GetLogger()
 
 	configPath := "config.yml"
 	if len(os.Args) > 1 {
@@ -279,7 +286,7 @@ func init() {
 func main() {
 	defer gaba.Close()
 
-	common.GetLoggerInstance()
+	gaba.GetLogger()
 
 	mainMenuItems := []gaba.MenuItem{
 		{
@@ -299,7 +306,7 @@ func main() {
 	}
 
 	options := gaba.DefaultListOptions("SaveSync", mainMenuItems)
-	options.EnableAction = true
+	options.ActionButton = constants.VirtualButtonA
 	options.FooterHelpItems = []gaba.FooterHelpItem{
 		{ButtonName: "B", HelpText: "Quit"},
 		{ButtonName: "A", HelpText: "Select"},
@@ -309,19 +316,24 @@ func main() {
 
 		sel, err := gaba.List(options)
 		if err != nil {
+			if gaba.IsCancelled(err) {
+				os.Exit(0)
+			}
 			log.Fatalf("Error displaying menu: %v", err)
 		}
 
-		if sel.IsNone() || sel.Unwrap().SelectedIndex == -1 {
+		if len(sel.Selected) == 0 {
 			os.Exit(0)
 		}
 
-		switch sel.Unwrap().SelectedItem.Metadata.(string) {
+		selectedItem := sel.Items[sel.Selected[0]]
+
+		switch selectedItem.Metadata.(string) {
 		case "Upload":
-			res, err := gaba.ProcessMessage("Uploading Saves...\nThis may take a second...", gaba.ProcessMessageOptions{ShowThemeBackground: true}, func() (interface{}, error) {
+			res, err := gaba.ProcessMessage("Uploading Saves...\nThis may take a second...", gaba.ProcessMessageOptions{ShowThemeBackground: true}, func() (map[string]int, error) {
 				uploaded, skipped, err := uploadSaves(con)
 
-				return map[string]interface{}{
+				return map[string]int{
 					"Uploaded": uploaded,
 					"Skipped":  skipped,
 				}, err
@@ -335,22 +347,22 @@ func main() {
 			} else {
 				message := ""
 
-				if res.Result.(map[string]interface{})["Uploaded"].(int) != 0 {
+				if res["Uploaded"] != 0 {
 					saveWord := "save"
-					if res.Result.(map[string]interface{})["Uploaded"].(int) > 1 {
+					if res["Uploaded"] > 1 {
 						saveWord += "s"
 					}
 
-					message += fmt.Sprintf("Uploaded %d %s!\n", res.Result.(map[string]interface{})["Uploaded"], saveWord)
+					message += fmt.Sprintf("Uploaded %d %s!\n", res["Uploaded"], saveWord)
 				}
 
-				if res.Result.(map[string]interface{})["Skipped"].(int) != 0 {
+				if res["Skipped"] != 0 {
 					saveWord := "save"
-					if res.Result.(map[string]interface{})["Skipped"].(int) > 1 {
+					if res["Skipped"] > 1 {
 						saveWord += "s"
 					}
 
-					message += fmt.Sprintf("Skipped %d unchanged %s.\n", res.Result.(map[string]interface{})["Skipped"], saveWord)
+					message += fmt.Sprintf("Skipped %d unchanged %s.\n", res["Skipped"], saveWord)
 				}
 
 				gaba.ProcessMessage(message, gaba.ProcessMessageOptions{ShowThemeBackground: true}, func() (interface{}, error) {
@@ -366,11 +378,11 @@ func main() {
 				ConfirmButton: constants.VirtualButtonX,
 			})
 
-			if confirm.IsNone() {
+			if confirm == nil || !confirm.Confirmed {
 				break
 			}
 
-			res, err := gaba.ProcessMessage("Downloading Saves...\nThis may take a second...", gaba.ProcessMessageOptions{ShowThemeBackground: true}, func() (interface{}, error) {
+			res, err := gaba.ProcessMessage("Downloading Saves...\nThis may take a second...", gaba.ProcessMessageOptions{ShowThemeBackground: true}, func() (int, error) {
 				return downloadSaves(con)
 			})
 
@@ -380,7 +392,7 @@ func main() {
 					return nil, nil
 				})
 			} else {
-				gaba.ProcessMessage(fmt.Sprintf("Successfully downloaded %d saves!", res.Result.(int)), gaba.ProcessMessageOptions{ShowThemeBackground: true}, func() (interface{}, error) {
+				gaba.ProcessMessage(fmt.Sprintf("Successfully downloaded %d saves!", res), gaba.ProcessMessageOptions{ShowThemeBackground: true}, func() (interface{}, error) {
 					time.Sleep(2000 * time.Millisecond)
 					return nil, nil
 				})
